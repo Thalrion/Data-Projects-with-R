@@ -1,0 +1,443 @@
+---
+title: "Kununu - Arbeitgeberanalyse"
+author: "Autor: Matthew Ludwig"
+date: "Startdatum: 23 Mai 2017"
+runtime: shiny
+output: 
+  html_document:
+    theme: cerulean
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+---
+
+
+```{r echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(readxl)
+library(purrr)
+library(broom)
+library(tidyr)
+```  
+
+
+```{r echo=FALSE, results='hide'} 
+Daten_kununu_modified <- read_excel("Arbeitsmarktstudie.xlsx")
+Daten_kununu_modified$Benefit_Index <- round(Daten_kununu_modified$Benefit_Index, 2)
+Daten_kununu_modified$Anzahl_Reviews <- as.integer(Daten_kununu_modified$Anzahl_Reviews)
+glimpse(Daten_kununu_modified)
+```  
+
+```{r echo=FALSE} 
+dropdownButton <- function(label = "", status = c("default", "primary", "success", "info", "warning", "danger"), ..., width = NULL) {
+
+  status <- match.arg(status)
+  # dropdown button content
+  html_ul <- list(
+    class = "dropdown-menu",
+    style = if (!is.null(width)) 
+      paste0("width: ", validateCssUnit(width), ";"),
+    lapply(X = list(...), FUN = tags$li, style = "margin-left: 10px; margin-right: 10px;")
+  )
+  # dropdown button apparence
+  html_button <- list(
+    class = paste0("btn btn-", status," dropdown-toggle"),
+    type = "button", 
+    `data-toggle` = "dropdown"
+  )
+  html_button <- c(html_button, list(label))
+  html_button <- c(html_button, list(tags$span(class = "caret")))
+  # final result
+  tags$div(
+    class = "dropdown",
+    do.call(tags$button, html_button),
+    do.call(tags$ul, html_ul),
+    tags$script(
+      "$('.dropdown-menu').click(function(e) {
+      e.stopPropagation();
+});")
+  )
+  }
+```
+**(Achtung: Dokumentation noch in heftiger Bearbeitung!)**
+
+
+# Zweck
+
+Welches Unternehmen ist das Beliebteste in Deutschland? Und welche Branchen? Welche
+Branchen sind am tierfreundlichsten und inwiefern wirkt sich das Vorhandensein von `Benefits`
+(wie z.B. `Flexible Arbeitszeiten` oder `Kantine`) auf die Mitarbeiterzufriedenheit aus?
+
+Diese Fragen und mehr sollen in den nachfolgenden, interaktiven Grafiken nachgegangen werden!
+
+# Datenquelle
+Die den Analysen zugrunde liegende Daten wurden direkt von [kununu.de](https://www.kununu.com/) uebernommen.
+
+
+> [kununu](https://www.kununu.com/) ist die fuehrende Arbeitgeber-Bewertungsplattform in Europa. Mit ueber 1,4 
+> Millionen Erfahrungsberichten zu ueber 300.000 Arbeitgebern steht kununu fuer Transparenz am Arbeitsmarkt und
+> unterstuetzt seine Nutzer bei der zweitwichtigsten Lebensentscheidung - der Jobwahl. Die kununu GmbH ist seit 2013 ein Tochterunternehmen der XING AG.
+
+
+Auf [kununu](https://www.kununu.com/) koennen Mitarbeiter / ehemalige Mitarbeiter und Bewerber detaillierte Bewertungen zu einem Arbeitgeber abgeben. Der wichtigste Indikator fuer die Zufriedenheit ist hierbei der sogennante `kununu-Score`, der zwischen 0 und 5 liegen kann. Dieser setzt sich aus der Bewertung von 13 Wohlfuehl - und Karrierefaktoren zusammen. 
+
+Zusaetzlich dazu kann der User angeben, ob das Unternehmen ein bestimmtes `Benefit` angeboten hat (insgesamt 19 Verschiedene).
+
+# Datenbank
+Aus den oeffentlich zugaenglichen Bewertungen zu den einzelnen Unternehmen habe ich eine Datenbank zusammengestellt,
+die die Informationen der 361 relevantesten Unternehmen auf [kununu](https://www.kununu.com/) enthaelt.
+
+**Notiz: Mit "relevant" meine ich hierbei weder die Groesse noch eine subjektive Einschaetzung. Die `Relevanz` ergibt
+sich lediglich durch die gesamte `Anzahl der Reviews`. Desto mehr Reviews ein Unternehmen auf [kununu](https://www.kununu.com/) hat, desto relevanter ist es (und desto aussagekraeftiger ermittelte Kennzahlen)**
+
+Neben Stammdaten wie Name/Branche enthaelt die Datenbank auch wichtige Kennzahlen wie den erwaehnten `kununu-Score` oder den Prozensatz an `Empfehlungen`. 
+Zusaetzlich dazu wird auch fuer jedes Unternehmen angegeben, inwiefern 19 verschiedene `Benefits` angeboten wurden. 
+
+Wie die Benefitkennzahlen berechnet werden, soll folgendes Beispiel zeigen:
+
+**Beispielsrechnung Siemens | flexible Arbeitszeiten: **
+
+> flex. Arbeitszeiten bei 1380 von 2134 Bewertern
+
+```{r}
+Kennzahl_flex_Arbeitszeiten <-  1380 / 2134
+round(Kennzahl_flex_Arbeitszeiten, 2)
+```
+>  Interpretation: ~ 65% der Bewerter haben angegeben, dass man bei Siemens flexible Arbeitszeiten anbietet.
+
+Aus dem (ungewichteten) Mittelwert der Benefits wird ebenfalls ein `Benefit_Index` berechnet. 
+
+Die interaktive Datenbank laesst sich ueber folgende Darstellung erkunden:
+
+```{r echo=FALSE} 
+    inputPanel(
+        selectInput("branche", label = "Welche Branche soll angezeigt werden?",
+                    choices = c("Alle", "Industrie", "IT/Telekommunikation", "Energie/Transport", "Dienstleistung", "Finanzen",
+                                "Verwaltung", "Konsum", "Gesundheit", "Internet/Medien")),
+        
+      dropdownButton(
+              label = "Welche Spalten sollen angezeigt werden?", status = "default", width = "100%", 
+              checkboxGroupInput(inputId = "check1", label = "", selected = c("Unternehmensname", "Branche", "Score", "Anzahl_Reviews", "Benefit_Index"), choices = colnames(Daten_kununu_modified), width = "100%"))
+          )
+
+ renderDataTable({
+  Daten_kununu_modified %>%
+    filter(
+      if (input$branche != "Alle") {
+      Branche == input$branche
+   } else {
+     Branche == Branche }
+    )%>%
+    select(grep(paste(input$check1, collapse = "|"), colnames(Daten_kununu_modified)))
+ }, options = list(orderClasses = TRUE, filter = "none"))
+```
+
+# Interaktive Visualisierung
+
+Auf Basis der Datenbank werden nun anschauliche Grafiken erzeugt, die helfen sollen, die am Anfang 
+gestellten Fragen zu beantworten.
+
+Selbstverstaendlich lassen sich die Grafiken durch wenige Clicks individualisieren:
+
+## Welche Benefits sind relevant?
+
+In der ersten Grafik ist ersichtlich, inwiefern das Anbieten von `flexiblen Arbeitszeiten` (X-Achse) Einfluss
+auf die Hoehe der `Empfehlungen` hat (Y-Achse). 
+
+Anhand der Steigung der ebenfalls abgebildeten Regressionslinie laesst sich ausserdem erkennen, in welcher `Branche`
+der positive, lineare Zusammenhang am groessten ist (in dem Fall wohl `Industrie`). 
+Der graue Rahmen, der sich um die Linie legt, gibt Auskunft ueber die Variabilitaet der Regressionslinie.
+
+Jeder einzelne Punkt repraesentiert 1 Unternehmen. Die groesse des Punktes variiert in Abhaengigkeit der Relevanz ( = `Anzahl an Bewertungen`). 
+
+```{r echo=FALSE, warning=FALSE, fig.width=20, fig.height=16} 
+choic <- colnames(Daten_kununu_modified)
+choic <- choic[6:25]
+inputPanel(
+  selectInput("y", label = "Welche Variable soll  auf der \"Y-Achse\" angezeigt werden?",
+              choices = c("Empfehlung", "Score")
+  ),
+  dropdownButton(
+        label = "Welche Variable soll  auf der \"X-Achse\" angezeigt werden?", status = "default", width = "100%",
+        radioButtons("x", label = "", selected = "Flexible_Arbeitszeiten", choices = choic, width = "100%")
+      )
+)
+
+ renderPlot({
+  Daten_kununu_modified %>%
+    ggplot(aes_string(x = input$x , y = input$y)) +
+    geom_point(aes(size = Anzahl_Reviews)) + 
+    facet_wrap(~ Branche) + 
+    geom_smooth(method = "lm") +
+    theme(text = element_text(size=15),axis.text.x = element_text(hjust=1),legend.position="none")
+
+ }, width = 1000, height = 800)
+```
+
+## Welche Branche bietet die meisten Benefits?
+
+In welcher Branche sollte man arbeiten, wenn man mit der hoechsten Chance seinen Hund mit zur Arbeit bringen will?
+In welcher werden die meisten Firmenwaegen angeboten und wo werden die meisten Mitarbeiterevents veranstaltet?
+
+Die naechste Grafik klaert diese und mehr Fragen - dabei varriert die Groesse der `Branchennamen` ebenfalls mit der
+`Relevanz` - also der kumulierten Summe aus allen `Reviews` aller enthaltenen Unternehmen.
+
+Die Hoehe der `y-Achse` bleibt bei jedem `Benefit` konstant. Damit wird ersichtlich, welche Branche die "gluecklichste" ist. So rein intuitiv gesehen muesste man also - wenn man die `Benefits` von oben nach unten durchschaltet - beobachten koennen dass die `Konsum` Branche immer weiter links angesiedelt ist (-> Ungluecklichste Branche = Weniger Benefits?) waehrend in der `Finanzbranche` ( = gluecklichste Branche) der gegenteilige Effekt zu beobachten sein sollte.
+
+```{r echo=FALSE, warning=FALSE, fig.width=20, fig.height=16} 
+inputPanel(
+  dropdownButton(
+        label = "Welche Variable soll  auf der \"X-Achse\" angezeigt werden?", status = "default", width = "100%",
+        radioButtons("rank", label = "", selected = "Flexible_Arbeitszeiten", choices = choic, width = "100%")
+      )
+)
+renderPlot({
+  if (input$rank == "Flexible_Arbeitszeiten") {
+    
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Flexible_Arbeitszeiten = mean(Flexible_Arbeitszeiten, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Flexible_Arbeitszeiten))%>%
+    ggplot(aes(x = Flexible_Arbeitszeiten, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16))+
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+ 
+    xlim(0.38, 0.80)
+    
+
+  } else if (input$rank == "Home_Office") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Home_Office = mean(Home_Office, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Home_Office))%>%
+    ggplot(aes(x = Home_Office, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16))+
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.15, 0.65) 
+ 
+  } else if (input$rank == "Kantine") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Kantine = mean(Kantine, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Kantine))%>%
+    ggplot(aes(x = Kantine, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16))+
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(-0.05, 0.80) 
+ 
+  } else if (input$rank == "Essenszulagen") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Essenszulagen = mean(Essenszulagen, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Essenszulagen))%>%
+    ggplot(aes(x = Essenszulagen, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16))+
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.00, 0.50) 
+ 
+  } else if (input$rank == "Kinderbetreuung") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Kinderbetreuung = mean(Kinderbetreuung, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Kinderbetreuung))%>%
+    ggplot(aes(x = Kinderbetreuung, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16))+
+    theme(text = element_text(size=30),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(-0.05, 0.35) 
+ 
+  } else if (input$rank == "Betriebliche_Altersvorsorge") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Betriebliche_Altersvorsorge = mean(Betriebliche_Altersvorsorge, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Betriebliche_Altersvorsorge))%>%
+    ggplot(aes(x = Betriebliche_Altersvorsorge, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16))+
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.20, 0.80) 
+ 
+  } else if (input$rank == "Barrierefreiheit") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Barrierefreiheit = mean(Barrierefreiheit, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Barrierefreiheit))%>%
+    ggplot(aes(x = Barrierefreiheit, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none") +
+    xlim(0.05, 0.35) 
+ 
+  } else if (input$rank == "Gesundheitsversorgung") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Gesundheitsversorgung = mean(Gesundheitsversorgung, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Gesundheitsversorgung))%>%
+    ggplot(aes(x = Gesundheitsversorgung, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.20, 0.60) 
+    
+  } else if (input$rank == "Betriebsarzt") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Betriebsarzt = mean(Betriebsarzt, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Betriebsarzt))%>%
+    ggplot(aes(x = Betriebsarzt, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none") +
+    xlim(0.00, 0.75) 
+    
+  } else if (input$rank == "Coaching") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Coaching = mean(Coaching, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Coaching))%>%
+    ggplot(aes(x = Coaching, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none") +
+    xlim(0.20, 0.45) 
+    
+  } else if (input$rank == "Parkplatz") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Parkplatz = mean(Parkplatz, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Parkplatz))%>%
+    ggplot(aes(x = Parkplatz, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.25, 0.75) 
+    
+  } else if (input$rank == "Verkehrsanbindung") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Verkehrsanbindung = mean(Verkehrsanbindung, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Verkehrsanbindung))%>%
+    ggplot(aes(x = Verkehrsanbindung, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.35, 0.60) 
+    
+  } else if (input$rank == "Mitarbeiterrabatte") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Mitarbeiterrabatte = mean(Mitarbeiterrabatte, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Mitarbeiterrabatte))%>%
+    ggplot(aes(x = Mitarbeiterrabatte, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.20, 0.80) 
+    
+  } else if (input$rank == "Firmenwagen") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Firmenwagen = mean(Firmenwagen, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Firmenwagen))%>%
+    ggplot(aes(x = Firmenwagen, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.10, 0.60) 
+    
+  } else if (input$rank == "Mitarbeiterhandy") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Mitarbeiterhandy = mean(Mitarbeiterhandy, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Mitarbeiterhandy))%>%
+    ggplot(aes(x = Mitarbeiterhandy, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.15, 0.70) 
+    
+  } else if (input$rank == "Mitarbeiterbeteiligungen") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Mitarbeiterbeteiligungen = mean(Mitarbeiterbeteiligungen, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Mitarbeiterbeteiligungen))%>%
+    ggplot(aes(x = Mitarbeiterbeteiligungen, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.05, 0.35) 
+    
+  } else if (input$rank == "Mitarbeiterevents") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Mitarbeiterevents = mean(Mitarbeiterevents, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Mitarbeiterevents))%>%
+    ggplot(aes(x = Mitarbeiterevents, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.10, 0.35) 
+    
+  } else if (input$rank == "Internetnutzung") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Internetnutzung = mean(Internetnutzung, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Internetnutzung))%>%
+    ggplot(aes(x = Internetnutzung, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.30, 0.70) 
+    
+  } else if (input$rank == "Hunde_toleriert") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Hunde_toleriert = mean(Hunde_toleriert, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Hunde_toleriert))%>%
+    ggplot(aes(x = Hunde_toleriert, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none")+
+    xlim(0.00, 0.08) 
+    
+  } else if (input$rank == "Benefit_Index") {
+  Daten_kununu_modified %>%
+    group_by(Branche)%>%
+    summarize(Benefit_Index = mean(Benefit_Index, 2, na.rm = TRUE), 
+              Relevanz = sum(Anzahl_Reviews), Score = mean(Score), na.rm = TRUE)%>%
+    arrange(desc(Benefit_Index))%>%
+    ggplot(aes(x = Benefit_Index, y = Score, size = Relevanz, col = Branche)) +
+    geom_text(aes(label = Branche), alpha = 0.7) + 
+    scale_size_continuous(range = c(7, 16)) +
+    theme(text = element_text(size=25),axis.text.x = element_text(hjust=1),legend.position="none") +
+    xlim(0.20, 0.50) 
+  }
+  
+}, width = 1000, height = 700)
+```

@@ -1,2 +1,2 @@
-# Some-own-projects
-Sometimes, when i am really curious, i just start something and sometimes it ends in something really interesting
+# Data Projects with R
+Sometimes, when I am really curious, I just start something and sometimes it ends in something really interesting.
